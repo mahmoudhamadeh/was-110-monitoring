@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAS-110 Monitoring</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f4;
+            margin: 20px;
+        }
+        .main-title {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 900px;
+            margin-bottom: 20px;
+        }
+        .current-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+            width: 100%;
+        }
+        .stat-card {
+            background-color: #e9e9e9;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .stat-card h2 {
+            margin-top: 0;
+            color: #555;
+            font-size: 1.1em;
+        }
+        .stat-card p {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #007bff;
+            margin: 5px 0;
+        }
+
+        .graph-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .graph-controls button {
+            padding: 8px 15px;
+            border: 1px solid #007bff;
+            border-radius: 5px;
+            background-color: #fff;
+            color: #007bff;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .graph-controls button.active,
+        .graph-controls button:hover {
+            background-color: #007bff;
+            color: #fff;
+        }
+        .time-slider-container {
+            width: 100%;
+            margin-top: 10px;
+        }
+        .time-slider-container input[type="range"] {
+            width: 100%;
+            -webkit-appearance: none;
+            height: 8px;
+            background: #d3d3d3;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+            border-radius: 5px;
+        }
+        .time-slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+        }
+        .time-slider-container input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+        }
+
+        .graphs-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            width: 100%;
+        }
+        @media (min-width: 768px) {
+            .graphs-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        .graph-card {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .graph-card h2 {
+            margin-top: 0;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .graph-card canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <h1 class="main-title">WAS-110 Monitoring</h1>
+
+    <div class="container current-stats">
+        <div class="stat-card">
+            <h2>CPU 0 Temp</h2>
+            <p id="currentTemp1">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>CPU 1 Temp</h2>
+            <p id="currentTemp2">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Optical Temp</h2>
+            <p id="currentOpticalTemp">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Supply Voltage</h2>
+            <p id="currentVoltage">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Bias Current</h2>
+            <p id="currentCurrent">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Tx Power</h2>
+            <p id="currentTransmitPower">Loading...</p>
+        </div>
+        <div class="stat-card">
+            <h2>Rx Power</h2>
+            <p id="currentReceivePower">Loading...</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="graph-controls">
+            <button data-hours="1">1 Hour</button>
+            <button data-hours="3" class="active">3 Hours</button>
+            <button data-hours="6">6 Hours</button>
+            <button data-hours="12">12 Hours</button>
+        </div>
+        <div class="time-slider-container">
+            <input type="range" id="timeSlider" min="0" max="0" value="0">
+        </div>
+
+        <div class="graphs-grid">
+            <div class="graph-card">
+                <h2>Temperatures (°C)</h2>
+                <canvas id="tempChart"></canvas>
+            </div>
+            <div class="graph-card">
+                <h2>Supply Voltage (V)</h2>
+                <canvas id="voltageChart"></canvas>
+            </div>
+            <div class="graph-card">
+                <h2>Bias Current (mA)</h2>
+                <canvas id="currentChart"></canvas>
+            </div>
+            <div class="graph-card">
+                <h2>Optical Power (dBm)</h2>
+                <canvas id="powerChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const currentTemp1El = document.getElementById('currentTemp1');
+        const currentTemp2El = document.getElementById('currentTemp2');
+        const currentOpticalTempEl = document.getElementById('currentOpticalTemp');
+        const currentVoltageEl = document.getElementById('currentVoltage');
+        const currentCurrentEl = document.getElementById('currentCurrent');
+        const currentTransmitPowerEl = document.getElementById('currentTransmitPower');
+        const currentReceivePowerEl = document.getElementById('currentReceivePower');
+
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const voltageCtx = document.getElementById('voltageChart').getContext('2d');
+        const currentCtx = document.getElementById('currentChart').getContext('2d');
+        const powerCtx = document.getElementById('powerChart').getContext('2d');
+
+        let tempChart, voltageChart, currentChart, powerChart; 
+        let fullHistoryData = {
+            timestamps: [], temp1: [], temp2: [], optical_temp: [],
+            voltage: [], current: [], transmit_power: [], receive_power: []
+        };
+
+        let selectedHours = 3; 
+        let sliderValue = 0;   
+
+        function updateChart(chartInstance, ctx, type, labels, datasets, options) {
+            if (chartInstance) {
+                chartInstance.data.labels = labels;
+                chartInstance.data.datasets = datasets;
+                chartInstance.options = options;
+                chartInstance.update();
+            } else {
+                chartInstance = new Chart(ctx, {
+                    type: type,
+                    data: { labels: labels, datasets: datasets },
+                    options: options
+                });
+            }
+            return chartInstance;
+        }
+
+        function getZoomedData() {
+            const totalPoints = fullHistoryData.timestamps.length;
+            if (totalPoints === 0) return { timestamps: [], temp1: [], temp2: [], optical_temp: [],
+                                          voltage: [], current: [], transmit_power: [], receive_power: [] };
+
+            // Assuming 1 point per minute from backend
+            const pointsInWindow = selectedHours * 60; 
+
+            const maxSliderValue = Math.max(0, totalPoints - pointsInWindow);
+            let startIndex = Math.min(maxSliderValue, sliderValue);
+            let endIndex = Math.min(totalPoints, startIndex + pointsInWindow);
+            
+            return {
+                timestamps: fullHistoryData.timestamps.slice(startIndex, endIndex),
+                temp1: fullHistoryData.temp1.slice(startIndex, endIndex),
+                temp2: fullHistoryData.temp2.slice(startIndex, endIndex),
+                optical_temp: fullHistoryData.optical_temp.slice(startIndex, endIndex),
+                voltage: fullHistoryData.voltage.slice(startIndex, endIndex),
+                current: fullHistoryData.current.slice(startIndex, endIndex),
+                transmit_power: fullHistoryData.transmit_power.slice(startIndex, endIndex),
+                receive_power: fullHistoryData.receive_power.slice(startIndex, endIndex)
+            };
+        }
+
+        function renderCharts() {
+            const zoomedData = getZoomedData();
+
+            const commonChartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Time' },
+                        type: 'category',
+                        ticks: { maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }
+                    },
+                    y: { beginAtZero: false, grid: { drawOnChartArea: true } }
+                },
+                animation: { duration: 0 },
+                plugins: { legend: { display: true } }
+            };
+
+            const tempDatasets = [
+                { label: 'CPU 0 Temp (°C)', data: zoomedData.temp1, borderColor: 'rgb(75, 192, 192)', tension: 0.1, fill: false },
+                { label: 'CPU 1 Temp (°C)', data: zoomedData.temp2, borderColor: 'rgb(255, 99, 132)', tension: 0.1, fill: false },
+                { label: 'Optical Temp (°C)', data: zoomedData.optical_temp, borderColor: 'rgb(54, 162, 235)', tension: 0.1, fill: false }
+            ];
+            const tempOptions = JSON.parse(JSON.stringify(commonChartOptions));
+            tempOptions.scales.y.title = { display: true, text: 'Temperature (°C)' };
+            const tempMin = Math.min(...zoomedData.temp1, ...zoomedData.temp2, ...zoomedData.optical_temp);
+            const tempMax = Math.max(...zoomedData.temp1, ...zoomedData.temp2, ...zoomedData.optical_temp);
+            tempOptions.scales.y.min = tempMin !== Infinity ? Math.floor(tempMin / 1) * 1 - 2 : 40;
+            tempOptions.scales.y.max = tempMax !== -Infinity ? Math.ceil(tempMax / 1) * 1 + 2 : 60;
+            tempChart = updateChart(tempChart, tempCtx, 'line', zoomedData.timestamps, tempDatasets, tempOptions);
+
+            const voltageDatasets = [
+                { label: 'Supply Voltage (V)', data: zoomedData.voltage, borderColor: 'rgb(255, 159, 64)', tension: 0.1, fill: false }
+            ];
+            const voltageOptions = JSON.parse(JSON.stringify(commonChartOptions));
+            voltageOptions.scales.y.title = { display: true, text: 'Voltage (V)' };
+            // Adjust min/max based on your SFP stick's expected range
+            voltageOptions.scales.y.min = 3.20; 
+            voltageOptions.scales.y.max = 3.35; 
+            voltageChart = updateChart(voltageChart, voltageCtx, 'line', zoomedData.timestamps, voltageDatasets, voltageOptions);
+
+            const currentDatasets = [
+                { label: 'Bias Current (mA)', data: zoomedData.current, borderColor: 'rgb(153, 102, 255)', tension: 0.1, fill: false }
+            ];
+            const currentOptions = JSON.parse(JSON.stringify(commonChartOptions));
+            currentOptions.scales.y.title = { display: true, text: 'Current (mA)' };
+            const currentMin = Math.min(...zoomedData.current.filter(val => val !== null));
+            const currentMax = Math.max(...zoomedData.current.filter(val => val !== null));
+            currentOptions.scales.y.min = currentMin !== Infinity ? Math.floor(currentMin * 10) / 10 - 0.5 : 10;
+            currentOptions.scales.y.max = currentMax !== -Infinity ? Math.ceil(currentMax * 10) / 10 + 0.5 : 12;
+            currentChart = updateChart(currentChart, currentCtx, 'line', zoomedData.timestamps, currentDatasets, currentOptions);
+
+            const powerDatasets = [
+                { label: 'Tx Power (dBm)', data: zoomedData.transmit_power, borderColor: 'rgb(201, 203, 207)', tension: 0.1, fill: false },
+                { label: 'Rx Power (dBm)', data: zoomedData.receive_power, borderColor: 'rgb(0, 128, 0)', tension: 0.1, fill: false }
+            ];
+            const powerOptions = JSON.parse(JSON.stringify(commonChartOptions));
+            powerOptions.scales.y.title = { display: true, text: 'Optical Power (dBm)' };
+            // Adjust min/max based on your SFP stick's expected range
+            powerOptions.scales.y.min = -30;
+            powerOptions.scales.y.max = 10;
+            powerChart = updateChart(powerChart, powerCtx, 'line', zoomedData.timestamps, powerDatasets, powerOptions);
+
+            const maxSliderValue = Math.max(0, fullHistoryData.timestamps.length - pointsInWindow);
+            document.getElementById('timeSlider').max = maxSliderValue;
+            document.getElementById('timeSlider').value = sliderValue;
+        }
+
+        function updateStat(element, value, unit) {
+            element.textContent = value !== null ? `${value}${unit}` : 'N/A';
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/data');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                updateStat(currentTemp1El, data.current.temp1, '°C');
+                updateStat(currentTemp2El, data.current.temp2, '°C');
+                updateStat(currentOpticalTempEl, data.current.optical_temp, '°C');
+                updateStat(currentVoltageEl, data.current.voltage, ' V');
+                updateStat(currentCurrentEl, data.current.current, ' mA');
+                updateStat(currentTransmitPowerEl, data.current.transmit_power, ' dBm');
+                updateStat(currentReceivePowerEl, data.current.receive_power, ' dBm');
+
+                fullHistoryData = data.history;
+                renderCharts();
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                const errorText = 'Error';
+                currentTemp1El.textContent = errorText;
+                currentTemp2El.textContent = errorText;
+                currentOpticalTempEl.textContent = errorText;
+                currentVoltageEl.textContent = errorText;
+                currentCurrentEl.textContent = errorText;
+                currentTransmitPowerEl.textContent = errorText;
+                currentReceivePowerEl.textContent = errorText;
+            }
+        }
+
+        document.querySelectorAll('.graph-controls button').forEach(button => {
+            button.addEventListener('click', function() {
+                document.querySelectorAll('.graph-controls button').forEach(btn => btn.classList.remove('active'));
+                this.classList.add('active');
+                
+                selectedHours = parseInt(this.dataset.hours);
+                sliderValue = 0;
+                renderCharts();
+            });
+        });
+
+        document.getElementById('timeSlider').addEventListener('input', function() {
+            sliderValue = parseInt(this.value);
+            renderCharts();
+        });
+
+        fetchData();
+        setInterval(fetchData, 300000); // 5 minutes (300 seconds)
+    </script>
+</body>
+</html>
