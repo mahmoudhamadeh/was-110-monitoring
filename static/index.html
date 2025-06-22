@@ -180,7 +180,7 @@
         </div>
         <div class="stat-card countdown-card">
             <h2>Next Refresh In</h2>
-            <p id="countdown">300s</p>
+            <p id="countdown">Loading...</p> <!-- Changed initial text -->
         </div>
     </div>
 
@@ -239,10 +239,13 @@
         let selectedHours = 3; 
         let sliderValue = 0;   
 
-        const FETCH_INTERVAL_MS = 300000;
-        const FETCH_TIMEOUT_MS = 10000;
+        // Frontend refresh interval (should be faster than backend poll for smooth countdown)
+        const FRONTEND_REFRESH_INTERVAL_MS = 1000; // Update countdown every second
+        const FETCH_TIMEOUT_MS = 10000; // 10 seconds timeout for fetch
+
         let countdownTimer;
-        let secondsRemaining;
+        let secondsRemaining; // This will now be initialized from backend
+        let lastBackendFetchTimestamp = Date.now(); // To track when backend last provided a value
 
         function updateChart(chartInstance, ctx, type, labels, datasets, options) {
             if (chartInstance) {
@@ -285,9 +288,7 @@
 
         function renderCharts() {
             const zoomedData = getZoomedData();
-            // --- FIX: Declare pointsInWindow here as well ---
-            const pointsInWindow = selectedHours * 60; // Declare this here based on selectedHours
-            // --- End Fix ---
+            const pointsInWindow = selectedHours * 60;
 
             const commonChartOptions = {
                 responsive: true,
@@ -366,24 +367,41 @@
         }
         
         function updateCountdown() {
-            secondsRemaining--;
-            if (secondsRemaining < 0) {
-                secondsRemaining = 0; 
+            // Calculate actual remaining time based on last backend update
+            const timeSinceLastFetch = (Date.now() - lastBackendFetchTimestamp) / 1000; // in seconds
+            const nextRefreshDueIn = (secondsRemaining - timeSinceLastFetch);
+            
+            if (nextRefreshDueIn <= 0) {
+                countdownEl.textContent = '0s';
+                // Trigger an immediate fetch if we're past due (handles missed intervals)
+                if (!isFetching) { // Prevent multiple simultaneous fetches
+                    fetchData(); 
+                }
+            } else {
+                countdownEl.textContent = `${Math.ceil(nextRefreshDueIn)}s`;
+                countdownEl.style.color = '#0c5460'; 
             }
-            countdownEl.textContent = `${secondsRemaining}s`;
-            countdownEl.style.color = '#0c5460'; 
         }
 
+        let isFetching = false; // Flag to prevent multiple fetches
+
         async function fetchData() {
-            secondsRemaining = Math.floor(FETCH_INTERVAL_MS / 1000);
-            if (countdownTimer) clearInterval(countdownTimer);
-            countdownTimer = setInterval(updateCountdown, 1000);
+            if (isFetching) {
+                console.log('Fetch already in progress, skipping.');
+                return;
+            }
+            isFetching = true; // Set flag to true
+
+            // Clear any existing periodic countdown timer before starting a new fetch
+            if (countdownTimer) clearInterval(countdownTimer); 
+            countdownEl.textContent = 'Fetching...'; // Indicate active fetch
+            countdownEl.style.color = '#007bff'; // Blue for fetching status
 
             try {
                 const controller = new AbortController();
                 const id = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-                const fetchUrl = `http://${window.location.hostname}:5050/data`;
+                const fetchUrl = `${window.location.protocol}//${window.location.hostname}:5050/data`;
                 console.log('Attempting to fetch from:', fetchUrl);
                 const response = await fetch(fetchUrl, { signal: controller.signal });
                 clearTimeout(id);
@@ -405,6 +423,7 @@
                 console.log('Current data received:', data.current);
                 console.log('History data received:', data.history);
                 
+                // Update current stats with fetched data
                 updateStat(currentTemp1El, data.current.temp1, '°C');
                 updateStat(currentTemp2El, data.current.temp2, '°C');
                 updateStat(currentOpticalTempEl, data.current.optical_temp, '°C');
@@ -413,8 +432,10 @@
                 updateStat(currentTransmitPowerEl, data.current.transmit_power, ' dBm');
                 updateStat(currentReceivePowerEl, data.current.receive_power, ' dBm');
                 
-                countdownEl.textContent = `${secondsRemaining}s`;
-                countdownEl.style.color = '#0c5460';
+                // Synchronize countdown with backend's next refresh time
+                secondsRemaining = data.current.time_to_next_refresh_s || Math.floor(FETCH_INTERVAL_MS / 1000);
+                lastBackendFetchTimestamp = Date.now(); // Record when this successful fetch completed on frontend
+                countdownTimer = setInterval(updateCountdown, FRONTEND_REFRESH_INTERVAL_MS); // Restart countdown timer
 
                 fullHistoryData = data.history;
                 renderCharts();
@@ -434,6 +455,8 @@
                 countdownEl.textContent = 'Failed';
                 countdownEl.style.color = 'red';
                 if (countdownTimer) clearInterval(countdownTimer);
+            } finally {
+                isFetching = false; // Always reset flag
             }
         }
 
@@ -453,8 +476,13 @@
             renderCharts();
         });
 
-        fetchData();
-        setInterval(fetchData, FETCH_INTERVAL_MS);
+        // Initial fetch and start periodic fetching
+        // The initial setInterval is removed as fetchData will now re-arm itself for the next fetch
+        // and the countdown logic will trigger the next fetch when due.
+        fetchData(); 
+        // We will no longer use setInterval(fetchData, FETCH_INTERVAL_MS); here.
+        // Instead, the countdown logic will trigger fetchData when secondsRemaining <= 0
+        // for better synchronization.
     </script>
 </body>
 </html>

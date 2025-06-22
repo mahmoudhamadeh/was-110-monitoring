@@ -1,9 +1,9 @@
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta # Import timedelta
 import pytz
 from flask import Flask, jsonify, send_from_directory
-from flask_cors import CORS # Import CORS
+from flask_cors import CORS
 import threading
 import collections
 import logging
@@ -15,7 +15,7 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 app = Flask(__name__, static_folder='static')
-CORS(app) # Initialize CORS with your Flask app
+CORS(app)
 
 SFP_USER = "root"
 SFP_HOST = "192.168.11.1"
@@ -46,7 +46,8 @@ SFP_OPTICAL_STATUS_COMMAND = SFP_OPTICAL_STATUS_COMMAND.strip()
 current_data = {
     "temp1": None, "temp2": None, "optical_temp": None,
     "voltage": None, "current": None, "transmit_power": None, "receive_power": None,
-    "timestamp": None
+    "timestamp": None,
+    "time_to_next_refresh_s": None # New field for countdown
 }
 
 HISTORY_MAX_SIZE = 60 * 24
@@ -58,6 +59,10 @@ current_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 transmit_power_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 receive_power_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 timestamps_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
+
+# Global variable to track the last successful fetch time
+last_fetch_completion_time = None 
+FETCH_INTERVAL_SECONDS = 300 # Must match the time.sleep value
 
 def execute_remote_command(client, command_string):
     stdin, stdout, stderr = client.exec_command(command_string)
@@ -90,6 +95,7 @@ def parse_optical_status_output(output):
     return parsed_data
 
 def fetch_and_update_sfp_temperatures():
+    global last_fetch_completion_time # Declare intent to modify global variable
     if SFP_PASSWORD is None or SFP_PASSWORD == "dummy_password_not_set":
         print(f"[{datetime.now().isoformat()}] ERROR: SFP password environment variable (SFP_ROOT_PASSWORD) not set or is dummy. Skipping fetch.", flush=True)
         return
@@ -138,6 +144,9 @@ def fetch_and_update_sfp_temperatures():
             "receive_power": optical_data.get("receive_power"),
             "timestamp": now_local.isoformat()
         })
+        
+        # Update last fetch completion time on success
+        last_fetch_completion_time = datetime.now() 
 
         timestamps_history.append(now_local.strftime('%H:%M:%S'))
         temp1_history.append(current_data["temp1"])
@@ -152,17 +161,20 @@ def fetch_and_update_sfp_temperatures():
 
     except paramiko.AuthenticationException:
         print(f"[{datetime.now().isoformat()}] Authentication failed. Check username and password in .env file.", flush=True)
+        last_fetch_completion_time = None # Reset if failed, or leave as old
     except paramiko.SSHException as e:
         print(f"[{datetime.now().isoformat()}] SSH error: {e}", flush=True)
+        last_fetch_completion_time = None
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] An unexpected error occurred during fetch: {e}", flush=True)
+        last_fetch_completion_time = None
     finally:
         client.close()
 
 def periodic_fetch():
     while True:
         fetch_and_update_sfp_temperatures()
-        time.sleep(300)
+        time.sleep(FETCH_INTERVAL_SECONDS) # Use the constant here
 
 fetch_thread = threading.Thread(target=periodic_fetch, daemon=True)
 fetch_thread.start()
@@ -173,7 +185,15 @@ def index():
 
 @app.route('/data')
 def get_data():
-    return jsonify({
+    time_to_next_refresh_s = None
+    if last_fetch_completion_time:
+        # Calculate time elapsed since last successful fetch
+        elapsed_time = datetime.now() - last_fetch_completion_time
+        # Time remaining until next scheduled fetch
+        # Ensure it's not negative if the next fetch has already happened
+        time_to_next_refresh_s = max(0, FETCH_INTERVAL_SECONDS - int(elapsed_time.total_seconds()))
+
+    response_data = {
         "current": current_data,
         "history": {
             "timestamps": list(timestamps_history),
@@ -185,7 +205,11 @@ def get_data():
             "transmit_power": list(transmit_power_history),
             "receive_power": list(receive_power_history)
         }
-    })
+    }
+    # Add time_to_next_refresh_s to the current data payload
+    response_data["current"]["time_to_next_refresh_s"] = time_to_next_refresh_s
+
+    return jsonify(response_data)
 
 if __name__ == '__main__':
     fetch_and_update_sfp_temperatures()
