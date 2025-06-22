@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 import pytz
 from flask import Flask, jsonify, send_from_directory
+from flask_cors import CORS # Import CORS
 import threading
 import collections
 import logging
@@ -14,6 +15,7 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 app = Flask(__name__, static_folder='static')
+CORS(app) # Initialize CORS with your Flask app
 
 SFP_USER = "root"
 SFP_HOST = "192.168.11.1"
@@ -23,7 +25,6 @@ if SFP_PASSWORD is None:
     print("WARNING: SFP_ROOT_PASSWORD environment variable not set. SSH authentication may fail.", flush=True)
     SFP_PASSWORD = "dummy_password_not_set"
 
-# Adjust your local timezone (e.g., 'America/Toronto')
 LOCAL_TIMEZONE = 'America/Toronto'
 
 SFP_CORE_TEMP_COMMAND = r"""
@@ -161,8 +162,7 @@ def fetch_and_update_sfp_temperatures():
 def periodic_fetch():
     while True:
         fetch_and_update_sfp_temperatures()
-        # Data fetch interval (in seconds)
-        time.sleep(300) # 5 minutes
+        time.sleep(300)
 
 fetch_thread = threading.Thread(target=periodic_fetch, daemon=True)
 fetch_thread.start()
@@ -189,4 +189,4 @@ def get_data():
 
 if __name__ == '__main__':
     fetch_and_update_sfp_temperatures()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5050, debug=False)
