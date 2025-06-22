@@ -180,7 +180,7 @@
         </div>
         <div class="stat-card countdown-card">
             <h2>Next Refresh In</h2>
-            <p id="countdown">Loading...</p> <!-- Changed initial text -->
+            <p id="countdown">Loading...</p>
         </div>
     </div>
 
@@ -239,13 +239,16 @@
         let selectedHours = 3; 
         let sliderValue = 0;   
 
-        // Frontend refresh interval (should be faster than backend poll for smooth countdown)
-        const FRONTEND_REFRESH_INTERVAL_MS = 1000; // Update countdown every second
-        const FETCH_TIMEOUT_MS = 10000; // 10 seconds timeout for fetch
+        const FRONTEND_REFRESH_INTERVAL_MS = 1000; 
+        const FETCH_TIMEOUT_MS = 10000; 
 
         let countdownTimer;
-        let secondsRemaining; // This will now be initialized from backend
-        let lastBackendFetchTimestamp = Date.now(); // To track when backend last provided a value
+        // secondsRemaining is now derived from backend data
+        let lastBackendFetchTimestamp = 0; // This will be updated with actual backend fetch timestamp
+
+        const BACKEND_FETCH_INTERVAL_SECONDS = 300; 
+
+        console.log('BACKEND_FETCH_INTERVAL_SECONDS:', BACKEND_FETCH_INTERVAL_SECONDS);
 
         function updateChart(chartInstance, ctx, type, labels, datasets, options) {
             if (chartInstance) {
@@ -367,35 +370,39 @@
         }
         
         function updateCountdown() {
-            // Calculate actual remaining time based on last backend update
-            const timeSinceLastFetch = (Date.now() - lastBackendFetchTimestamp) / 1000; // in seconds
-            const nextRefreshDueIn = (secondsRemaining - timeSinceLastFetch);
-            
-            if (nextRefreshDueIn <= 0) {
+            // Calculate remaining time based on the backend's *last actual fetch* timestamp
+            const now = Date.now();
+            const timeSinceBackendFetch = (now - lastBackendFetchTimestamp) / 1000; // in seconds
+            let effectiveSecondsRemaining = Math.ceil(BACKEND_FETCH_INTERVAL_SECONDS - timeSinceBackendFetch);
+
+            if (effectiveSecondsRemaining <= 0) {
                 countdownEl.textContent = '0s';
-                // Trigger an immediate fetch if we're past due (handles missed intervals)
-                if (!isFetching) { // Prevent multiple simultaneous fetches
-                    fetchData(); 
+                countdownEl.style.color = '#0c5460'; 
+                
+                // Trigger fetch ONLY IF enough time has passed since last actual fetch attempt
+                // Use a small buffer (e.g., 2 seconds) to avoid immediate re-triggers on timer drift.
+                if (!isFetching && timeSinceBackendFetch >= BACKEND_FETCH_INTERVAL_SECONDS - 2) { 
+                     console.log('Countdown hit 0 or went negative, triggering fetchData...');
+                     fetchData(); 
                 }
             } else {
-                countdownEl.textContent = `${Math.ceil(nextRefreshDueIn)}s`;
+                countdownEl.textContent = `${effectiveSecondsRemaining}s`;
                 countdownEl.style.color = '#0c5460'; 
             }
         }
 
-        let isFetching = false; // Flag to prevent multiple fetches
+        let isFetching = false; 
 
         async function fetchData() {
             if (isFetching) {
                 console.log('Fetch already in progress, skipping.');
                 return;
             }
-            isFetching = true; // Set flag to true
+            isFetching = true;
 
-            // Clear any existing periodic countdown timer before starting a new fetch
             if (countdownTimer) clearInterval(countdownTimer); 
-            countdownEl.textContent = 'Fetching...'; // Indicate active fetch
-            countdownEl.style.color = '#007bff'; // Blue for fetching status
+            countdownEl.textContent = 'Fetching...';
+            countdownEl.style.color = '#007bff';
 
             try {
                 const controller = new AbortController();
@@ -423,7 +430,6 @@
                 console.log('Current data received:', data.current);
                 console.log('History data received:', data.history);
                 
-                // Update current stats with fetched data
                 updateStat(currentTemp1El, data.current.temp1, '°C');
                 updateStat(currentTemp2El, data.current.temp2, '°C');
                 updateStat(currentOpticalTempEl, data.current.optical_temp, '°C');
@@ -432,10 +438,19 @@
                 updateStat(currentTransmitPowerEl, data.current.transmit_power, ' dBm');
                 updateStat(currentReceivePowerEl, data.current.receive_power, ' dBm');
                 
-                // Synchronize countdown with backend's next refresh time
-                secondsRemaining = data.current.time_to_next_refresh_s || Math.floor(FETCH_INTERVAL_MS / 1000);
-                lastBackendFetchTimestamp = Date.now(); // Record when this successful fetch completed on frontend
-                countdownTimer = setInterval(updateCountdown, FRONTEND_REFRESH_INTERVAL_MS); // Restart countdown timer
+                // --- FIX: Initialize lastBackendFetchTimestamp from backend's ISO string ---
+                if (data.current.last_fetch_timestamp_iso) {
+                    lastBackendFetchTimestamp = new Date(data.current.last_fetch_timestamp_iso).getTime();
+                    console.log('Frontend: Initializing lastBackendFetchTimestamp from backend data:', lastBackendFetchTimestamp);
+                } else {
+                    // Fallback if backend didn't provide it (e.g., initial load or error)
+                    lastBackendFetchTimestamp = Date.now(); 
+                    console.warn('Frontend: Backend did not provide last_fetch_timestamp_iso, using Date.now() as fallback.');
+                }
+                // --- End Fix ---
+
+                if (countdownTimer) clearInterval(countdownTimer); 
+                countdownTimer = setInterval(updateCountdown, FRONTEND_REFRESH_INTERVAL_MS);
 
                 fullHistoryData = data.history;
                 renderCharts();
@@ -456,7 +471,7 @@
                 countdownEl.style.color = 'red';
                 if (countdownTimer) clearInterval(countdownTimer);
             } finally {
-                isFetching = false; // Always reset flag
+                isFetching = false;
             }
         }
 
@@ -476,13 +491,7 @@
             renderCharts();
         });
 
-        // Initial fetch and start periodic fetching
-        // The initial setInterval is removed as fetchData will now re-arm itself for the next fetch
-        // and the countdown logic will trigger the next fetch when due.
         fetchData(); 
-        // We will no longer use setInterval(fetchData, FETCH_INTERVAL_MS); here.
-        // Instead, the countdown logic will trigger fetchData when secondsRemaining <= 0
-        // for better synchronization.
     </script>
 </body>
 </html>

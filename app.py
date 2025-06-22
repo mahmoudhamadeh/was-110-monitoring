@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime, timedelta # Import timedelta
+from datetime import datetime, timedelta, timezone # Import timezone
 import pytz
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
@@ -47,7 +47,8 @@ current_data = {
     "temp1": None, "temp2": None, "optical_temp": None,
     "voltage": None, "current": None, "transmit_power": None, "receive_power": None,
     "timestamp": None,
-    "time_to_next_refresh_s": None # New field for countdown
+    "time_to_next_refresh_s": None,
+    "last_fetch_timestamp_iso": None # This will be ISO UTC
 }
 
 HISTORY_MAX_SIZE = 60 * 24
@@ -60,9 +61,10 @@ transmit_power_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 receive_power_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 timestamps_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 
-# Global variable to track the last successful fetch time
-last_fetch_completion_time = None 
-FETCH_INTERVAL_SECONDS = 300 # Must match the time.sleep value
+# Global variable to track the last successful fetch completion time (Python datetime object, UTC)
+# Initialize to current UTC time. This ensures initial calculation from get_data is always reasonable.
+last_fetch_completion_time_dt = datetime.now(timezone.utc) 
+FETCH_INTERVAL_SECONDS = 300
 
 def execute_remote_command(client, command_string):
     stdin, stdout, stderr = client.exec_command(command_string)
@@ -95,7 +97,7 @@ def parse_optical_status_output(output):
     return parsed_data
 
 def fetch_and_update_sfp_temperatures():
-    global last_fetch_completion_time # Declare intent to modify global variable
+    global last_fetch_completion_time_dt 
     if SFP_PASSWORD is None or SFP_PASSWORD == "dummy_password_not_set":
         print(f"[{datetime.now().isoformat()}] ERROR: SFP password environment variable (SFP_ROOT_PASSWORD) not set or is dummy. Skipping fetch.", flush=True)
         return
@@ -131,7 +133,7 @@ def fetch_and_update_sfp_temperatures():
             optical_data = parse_optical_status_output(optical_output)
 
         local_tz = pytz.timezone(LOCAL_TIMEZONE)
-        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc) # Always use UTC for internal timestamps
         now_local = now_utc.astimezone(local_tz)
 
         current_data.update({
@@ -142,11 +144,12 @@ def fetch_and_update_sfp_temperatures():
             "current": optical_data.get("current"),
             "transmit_power": optical_data.get("transmit_power"),
             "receive_power": optical_data.get("receive_power"),
-            "timestamp": now_local.isoformat()
+            "timestamp": now_local.isoformat() # This timestamp is for display, localized
         })
         
-        # Update last fetch completion time on success
-        last_fetch_completion_time = datetime.now() 
+        # --- FIX: Set last_fetch_completion_time_dt to current UTC time ---
+        last_fetch_completion_time_dt = datetime.now(timezone.utc) 
+        # --- End Fix ---
 
         timestamps_history.append(now_local.strftime('%H:%M:%S'))
         temp1_history.append(current_data["temp1"])
@@ -161,37 +164,55 @@ def fetch_and_update_sfp_temperatures():
 
     except paramiko.AuthenticationException:
         print(f"[{datetime.now().isoformat()}] Authentication failed. Check username and password in .env file.", flush=True)
-        last_fetch_completion_time = None # Reset if failed, or leave as old
+        last_fetch_completion_time_dt = None 
     except paramiko.SSHException as e:
         print(f"[{datetime.now().isoformat()}] SSH error: {e}", flush=True)
-        last_fetch_completion_time = None
+        last_fetch_completion_time_dt = None
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] An unexpected error occurred during fetch: {e}", flush=True)
-        last_fetch_completion_time = None
+        last_fetch_completion_time_dt = None
     finally:
         client.close()
 
 def periodic_fetch():
     while True:
         fetch_and_update_sfp_temperatures()
-        time.sleep(FETCH_INTERVAL_SECONDS) # Use the constant here
+        time.sleep(FETCH_INTERVAL_SECONDS) 
 
 fetch_thread = threading.Thread(target=periodic_fetch, daemon=True)
 fetch_thread.start()
 
 @app.route('/')
 def index():
+    print(f"Serving index.html from: {app.static_folder}/index.html", flush=True)
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/data')
 def get_data():
     time_to_next_refresh_s = None
-    if last_fetch_completion_time:
-        # Calculate time elapsed since last successful fetch
-        elapsed_time = datetime.now() - last_fetch_completion_time
-        # Time remaining until next scheduled fetch
-        # Ensure it's not negative if the next fetch has already happened
-        time_to_next_refresh_s = max(0, FETCH_INTERVAL_SECONDS - int(elapsed_time.total_seconds()))
+    last_fetch_timestamp_iso = None 
+
+    # --- FIX: Ensure next_scheduled_fetch_time is correctly timezone-aware UTC ---
+    # Python 3.9's datetime.now() without tzinfo is naive. 
+    # Compare with datetime.utcnow() or make both timezone-aware.
+    # We ensure last_fetch_completion_time_dt is always UTC-aware when set.
+    # So, compare it to datetime.now(timezone.utc)
+    current_utc_time = datetime.now(timezone.utc) 
+    # --- End FIX ---
+
+    if last_fetch_completion_time_dt:
+        next_scheduled_fetch_time = last_fetch_completion_time_dt + timedelta(seconds=FETCH_INTERVAL_SECONDS)
+        
+        # Calculate remaining time from current UTC moment until next scheduled fetch
+        time_until_next_fetch = next_scheduled_fetch_time - current_utc_time
+        
+        time_to_next_refresh_s = max(0, int(time_until_next_fetch.total_seconds()))
+        
+        # --- FIX: Ensure ISO format is consistently UTC ('Z' suffix) ---
+        last_fetch_timestamp_iso = last_fetch_completion_time_dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        # --- End FIX ---
+
+    print(f"[{datetime.now().isoformat()}] get_data() called. last_fetch_completion_time_dt: {last_fetch_completion_time_dt} (UTC), current_utc_time: {current_utc_time} (UTC), time_to_next_refresh_s: {time_to_next_refresh_s}", flush=True)
 
     response_data = {
         "current": current_data,
@@ -206,11 +227,13 @@ def get_data():
             "receive_power": list(receive_power_history)
         }
     }
-    # Add time_to_next_refresh_s to the current data payload
     response_data["current"]["time_to_next_refresh_s"] = time_to_next_refresh_s
+    response_data["current"]["last_fetch_timestamp_iso"] = last_fetch_timestamp_iso
 
     return jsonify(response_data)
 
 if __name__ == '__main__':
-    fetch_and_update_sfp_temperatures()
+    # Initial fetch to populate data and set last_fetch_completion_time_dt
+    # This also ensures last_fetch_completion_time_dt is immediately set to now(UTC)
+    fetch_and_update_sfp_temperatures() 
     app.run(host='0.0.0.0', port=5050, debug=False)
