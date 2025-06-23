@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime, timedelta, timezone # Import timezone
+from datetime import datetime, timedelta, timezone
 import pytz
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
@@ -10,6 +10,7 @@ import logging
 import re
 import paramiko
 import os
+import shutil # Import shutil for file operations
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -43,15 +44,16 @@ SFP_CORE_TEMP_COMMAND = SFP_CORE_TEMP_COMMAND.strip()
 SFP_OPTICAL_STATUS_COMMAND = r"""pontop -b -g 'Optical Interface Status'"""
 SFP_OPTICAL_STATUS_COMMAND = SFP_OPTICAL_STATUS_COMMAND.strip()
 
-current_data = {
+current_stats_data = {
     "temp1": None, "temp2": None, "optical_temp": None,
     "voltage": None, "current": None, "transmit_power": None, "receive_power": None,
-    "timestamp": None,
-    "time_to_next_refresh_s": None,
-    "last_fetch_timestamp_iso": None # This will be ISO UTC
+    "timestamp": None 
 }
 
-HISTORY_MAX_SIZE = 60 * 24
+HISTORY_MAX_SIZE = 60 * 24 
+DATA_DIR = "/data" 
+HISTORY_FILE = os.path.join(DATA_DIR, "sfp_history.json") 
+
 temp1_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 temp2_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 optical_temp_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
@@ -61,8 +63,6 @@ transmit_power_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 receive_power_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 timestamps_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 
-# Global variable to track the last successful fetch completion time (Python datetime object, UTC)
-# Initialize to current UTC time. This ensures initial calculation from get_data is always reasonable.
 last_fetch_completion_time_dt = datetime.now(timezone.utc) 
 FETCH_INTERVAL_SECONDS = 300
 
@@ -111,7 +111,7 @@ def fetch_and_update_sfp_temperatures():
         
         client.connect(hostname=SFP_HOST, username=SFP_USER, password=SFP_PASSWORD, timeout=15)
         
-        temp_output, temp_error = execute_remote_command(client, SFP_CORE_TEMP_COMMAND)
+        temp_output, temp_error = execute_remote_command(client, SFP_CORE_TEMP_COMMAND) 
         if temp_error:
             print(f"[{datetime.now().isoformat()}] Core Temp SSH command error: {temp_error}", flush=True)
             print(f"[{datetime.now().isoformat()}] Raw Core Temp output (stdout): {temp_output}", flush=True)
@@ -124,19 +124,19 @@ def fetch_and_update_sfp_temperatures():
                 print(f"[{datetime.now().isoformat()}] Raw Core Temp output that caused error: {temp_output}", flush=True)
                 core_data = {}
 
-        optical_output, optical_error = execute_remote_command(client, SFP_OPTICAL_STATUS_COMMAND)
+        optical_output, optical_error = execute_remote_command(client, SFP_OPTICAL_STATUS_COMMAND) 
         if optical_error:
             print(f"[{datetime.now().isoformat()}] Optical Status SSH command error: {optical_error}", flush=True)
             print(f"[{datetime.now().isoformat()}] Raw Optical Status output (stdout): {optical_output}", flush=True)
             optical_data = {}
         else:
-            optical_data = parse_optical_status_output(optical_output)
+            optical_data = parse_optical_status_output(optical_output) 
 
         local_tz = pytz.timezone(LOCAL_TIMEZONE)
-        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc) # Always use UTC for internal timestamps
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc) 
         now_local = now_utc.astimezone(local_tz)
 
-        current_data.update({
+        current_stats_data.update({
             "temp1": float(core_data.get("temp1", 0)) if core_data.get("temp1") else None,
             "temp2": float(core_data.get("temp2", 0)) if core_data.get("temp2") else None,
             "optical_temp": float(core_data.get("optical_temp", 0)) if core_data.get("optical_temp") else None,
@@ -144,23 +144,22 @@ def fetch_and_update_sfp_temperatures():
             "current": optical_data.get("current"),
             "transmit_power": optical_data.get("transmit_power"),
             "receive_power": optical_data.get("receive_power"),
-            "timestamp": now_local.isoformat() # This timestamp is for display, localized
+            "timestamp": now_local.isoformat() 
         })
         
-        # --- FIX: Set last_fetch_completion_time_dt to current UTC time ---
         last_fetch_completion_time_dt = datetime.now(timezone.utc) 
-        # --- End Fix ---
 
         timestamps_history.append(now_local.strftime('%H:%M:%S'))
-        temp1_history.append(current_data["temp1"])
-        temp2_history.append(current_data["temp2"])
-        optical_temp_history.append(current_data["optical_temp"])
-        voltage_history.append(current_data["voltage"])
-        current_history.append(current_data["current"])
-        transmit_power_history.append(current_data["transmit_power"])
-        receive_power_history.append(current_data["receive_power"])
+        temp1_history.append(current_stats_data["temp1"])
+        temp2_history.append(current_stats_data["temp2"])
+        optical_temp_history.append(current_stats_data["optical_temp"])
+        voltage_history.append(current_stats_data["voltage"])
+        current_history.append(current_stats_data["current"])
+        transmit_power_history.append(current_stats_data["transmit_power"])
+        receive_power_history.append(current_stats_data["receive_power"])
 
-        print(f"[{datetime.now().isoformat()}] Successfully fetched: {current_data}", flush=True)
+        print(f"[{datetime.now().isoformat()}] Successfully fetched: {current_stats_data}", flush=True)
+        save_history_to_file() 
 
     except paramiko.AuthenticationException:
         print(f"[{datetime.now().isoformat()}] Authentication failed. Check username and password in .env file.", flush=True)
@@ -182,6 +181,82 @@ def periodic_fetch():
 fetch_thread = threading.Thread(target=periodic_fetch, daemon=True)
 fetch_thread.start()
 
+
+# --- DATA PERSISTENCE FUNCTIONS ---
+def save_history_to_file(): 
+    history_data = {
+        "timestamps": list(timestamps_history),
+        "temp1": list(temp1_history),
+        "temp2": list(temp2_history),
+        "optical_temp": list(optical_temp_history),
+        "voltage": list(voltage_history),
+        "current": list(current_history),
+        "transmit_power": list(transmit_power_history),
+        "receive_power": list(receive_power_history),
+        "last_fetch_completion_time_iso": last_fetch_completion_time_dt.isoformat() if last_fetch_completion_time_dt else None
+    }
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True) 
+        temp_file_path = os.path.join(DATA_DIR, "sfp_history.json.tmp")
+        final_file_path = os.path.join(DATA_DIR, "sfp_history.json")
+        
+        with open(temp_file_path, 'w') as f:
+            json.dump(history_data, f)
+        
+        # --- FIX: Use shutil.move for atomic move instead of os.replace ---
+        # os.replace can sometimes fail if the destination does not exist yet (first save)
+        # shutil.move is generally more robust for moving/replacing files.
+        shutil.move(temp_file_path, final_file_path)
+        # --- End FIX ---
+
+        print(f"[{datetime.now().isoformat()}] History saved to {final_file_path}. Points: {len(timestamps_history)}", flush=True)
+    except Exception as e:
+        print(f"[{datetime.now().isoformat()}] ERROR: Failed to save history to file: {e}", flush=True)
+
+def load_history_from_file(): 
+    global last_fetch_completion_time_dt 
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r') as f:
+                history_data = json.load(f)
+            
+            timestamps_history.extend(history_data.get("timestamps", []))
+            temp1_history.extend(history_data.get("temp1", []))
+            temp2_history.extend(history_data.get("temp2", []))
+            optical_temp_history.extend(history_data.get("optical_temp", []))
+            voltage_history.extend(history_data.get("voltage", []))
+            current_history.extend(history_data.get("current", []))
+            transmit_power_history.extend(history_data.get("transmit_power", []))
+            receive_power_history.extend(history_data.get("receive_power", []))
+
+            last_fetch_iso = history_data.get("last_fetch_completion_time_iso")
+            if last_fetch_iso:
+                try:
+                    last_fetch_completion_time_dt = datetime.fromisoformat(last_fetch_iso).astimezone(timezone.utc)
+                    print(f"[{datetime.now().isoformat()}] Loaded last fetch time: {last_fetch_completion_time_dt.isoformat()}", flush=True)
+                except ValueError:
+                    print(f"[{datetime.now().isoformat()}] WARNING: Could not parse saved timestamp {last_fetch_iso}, initializing to now.", flush=True)
+                    last_fetch_completion_time_dt = datetime.now(timezone.utc)
+            else:
+                print(f"[{datetime.now().isoformat()}] No last fetch timestamp found in file, initializing to now.", flush=True)
+                last_fetch_completion_time_dt = datetime.now(timezone.utc)
+
+            print(f"[{datetime.now().isoformat()}] History loaded from {HISTORY_FILE}. Points: {len(timestamps_history)}", flush=True)
+        else:
+            print(f"[{datetime.now().isoformat()}] No history file found at {HISTORY_FILE}. Starting fresh.", flush=True)
+            last_fetch_completion_time_dt = datetime.now(timezone.utc) 
+    except Exception as e:
+        print(f"[{datetime.now().isoformat()}] ERROR: Failed to load history from file: {e}. Clearing history and starting fresh.", flush=True)
+        timestamps_history.clear() 
+        temp1_history.clear()
+        temp2_history.clear()
+        optical_temp_history.clear()
+        voltage_history.clear()
+        current_history.clear()
+        transmit_power_history.clear()
+        receive_power_history.clear()
+        last_fetch_completion_time_dt = datetime.now(timezone.utc)
+
 @app.route('/')
 def index():
     print(f"Serving index.html from: {app.static_folder}/index.html", flush=True)
@@ -192,30 +267,23 @@ def get_data():
     time_to_next_refresh_s = None
     last_fetch_timestamp_iso = None 
 
-    # --- FIX: Ensure next_scheduled_fetch_time is correctly timezone-aware UTC ---
-    # Python 3.9's datetime.now() without tzinfo is naive. 
-    # Compare with datetime.utcnow() or make both timezone-aware.
-    # We ensure last_fetch_completion_time_dt is always UTC-aware when set.
-    # So, compare it to datetime.now(timezone.utc)
     current_utc_time = datetime.now(timezone.utc) 
-    # --- End FIX ---
 
     if last_fetch_completion_time_dt:
         next_scheduled_fetch_time = last_fetch_completion_time_dt + timedelta(seconds=FETCH_INTERVAL_SECONDS)
         
-        # Calculate remaining time from current UTC moment until next scheduled fetch
         time_until_next_fetch = next_scheduled_fetch_time - current_utc_time
         
         time_to_next_refresh_s = max(0, int(time_until_next_fetch.total_seconds()))
         
-        # --- FIX: Ensure ISO format is consistently UTC ('Z' suffix) ---
         last_fetch_timestamp_iso = last_fetch_completion_time_dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-        # --- End FIX ---
-
-    print(f"[{datetime.now().isoformat()}] get_data() called. last_fetch_completion_time_dt: {last_fetch_completion_time_dt} (UTC), current_utc_time: {current_utc_time} (UTC), time_to_next_refresh_s: {time_to_next_refresh_s}", flush=True)
 
     response_data = {
-        "current": current_data,
+        "current": {
+            **current_stats_data, 
+            "time_to_next_refresh_s": time_to_next_refresh_s,
+            "last_fetch_timestamp_iso": last_fetch_timestamp_iso
+        },
         "history": {
             "timestamps": list(timestamps_history),
             "temp1": list(temp1_history),
@@ -227,13 +295,20 @@ def get_data():
             "receive_power": list(receive_power_history)
         }
     }
-    response_data["current"]["time_to_next_refresh_s"] = time_to_next_refresh_s
-    response_data["current"]["last_fetch_timestamp_iso"] = last_fetch_timestamp_iso
+
+    print(f"[{datetime.now().isoformat()}] get_data() called. Sending last_fetch_completion_time_dt: {last_fetch_completion_time_dt} (UTC), time_to_next_refresh_s: {time_to_next_refresh_s}", flush=True)
+    print(f"[{datetime.now().isoformat()}] get_data() sending history points: {len(timestamps_history)}", flush=True)
 
     return jsonify(response_data)
 
 if __name__ == '__main__':
-    # Initial fetch to populate data and set last_fetch_completion_time_dt
-    # This also ensures last_fetch_completion_time_dt is immediately set to now(UTC)
-    fetch_and_update_sfp_temperatures() 
+    load_history_from_file() 
+    
+    if not timestamps_history or \
+       (datetime.now(timezone.utc) - last_fetch_completion_time_dt).total_seconds() > FETCH_INTERVAL_SECONDS:
+        print(f"[{datetime.now().isoformat()}] Initial/Catch-up fetch needed (no history or old history).", flush=True)
+        fetch_and_update_sfp_temperatures() 
+    else:
+        print(f"[{datetime.now().isoformat()}] Using loaded history, next fetch due in {FETCH_INTERVAL_SECONDS - (datetime.now(timezone.utc) - last_fetch_completion_time_dt).total_seconds():.0f}s.", flush=True)
+    
     app.run(host='0.0.0.0', port=5050, debug=False)

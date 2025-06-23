@@ -4,7 +4,12 @@ services:
     container_name: sfp_monitor_app
     restart: unless-stopped
     ports:
-      - "5050:5050"
+      - 5050:5050
     environment:
       - SFP_ROOT_PASSWORD
-    # network_mode: host
+    volumes:
+      - ./static:/app/static
+      - sfp_data_volume:/app/data
+volumes:
+  sfp_data_volume: null
+networks: {}
