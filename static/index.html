@@ -144,6 +144,11 @@
             width: 100% !important;
             height: 100% !important;
         }
+        .version-info {
+            margin-top: 20px;
+            font-size: 0.8em;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -215,6 +220,10 @@
         </div>
     </div>
 
+    <div class="version-info">
+        Version 1.0
+    </div>
+
     <script>
         const currentTemp1El = document.getElementById('currentTemp1');
         const currentTemp2El = document.getElementById('currentTemp2');
@@ -247,10 +256,7 @@
         let lastBackendFetchTimestamp = 0; 
 
         const BACKEND_FETCH_INTERVAL_SECONDS = 300; 
-        const BACKEND_FETCH_INTERVAL_MINUTES = BACKEND_FETCH_INTERVAL_SECONDS / 60; // New constant: 5 minutes
-
-        console.log('JS: BACKEND_FETCH_INTERVAL_SECONDS:', BACKEND_FETCH_INTERVAL_SECONDS);
-        console.log('JS: BACKEND_FETCH_INTERVAL_MINUTES:', BACKEND_FETCH_INTERVAL_MINUTES);
+        const BACKEND_FETCH_INTERVAL_MINUTES = BACKEND_FETCH_INTERVAL_SECONDS / 60; 
 
         function updateChart(chartInstance, ctx, type, labels, datasets, options) {
             if (chartInstance) {
@@ -271,38 +277,24 @@
         function getZoomedData() {
             const totalPoints = fullHistoryData.timestamps.length;
             if (totalPoints === 0) {
-                console.warn('JS: getZoomedData called with no fullHistoryData. Returning empty arrays.');
                 return { 
                     timestamps: [], temp1: [], temp2: [], optical_temp: [],
                     voltage: [], current: [], transmit_power: [], receive_power: [] 
                 };
             }
 
-            // --- FIX 1: Corrected pointsInWindow calculation based on actual backend interval ---
             const pointsInWindow = Math.floor(selectedHours * (60 / BACKEND_FETCH_INTERVAL_MINUTES)); 
-            // For 1 hour (60 min) with 5 min interval: 1 * (60/5) = 12 points
-            // For 3 hours (180 min) with 5 min interval: 3 * (60/5) = 36 points
-            // --- End FIX 1 ---
-
             let startIndex;
             let endIndex;
 
-            // --- FIX 2: Corrected Slicing Logic ---
-            // Determine the actual number of points to display in the window (cannot exceed totalPoints)
             const displayPoints = Math.min(pointsInWindow, totalPoints);
             
-            // Calculate the maximum possible index for the start of the window
-            // (Offset from the leftmost point that still allows the window to fit)
             const maxStartIndex = totalPoints - displayPoints;
 
-            // Clamp sliderValue to ensure it's within valid range [0, maxStartIndex]
-            // sliderValue == 0 means the window starts at the oldest possible data (leftmost scroll)
-            // sliderValue == maxStartIndex means the window starts at the latest possible data (rightmost scroll)
             sliderValue = Math.max(0, Math.min(sliderValue, maxStartIndex));
 
-            startIndex = sliderValue; // Start of the window is determined by the clamped sliderValue
+            startIndex = sliderValue; 
             endIndex = startIndex + displayPoints;
-            // --- End FIX 2 ---
 
             return {
                 timestamps: fullHistoryData.timestamps.slice(startIndex, endIndex),
@@ -318,18 +310,7 @@
 
         function renderCharts() {
             const zoomedData = getZoomedData();
-            // Re-calculate pointsInWindow based on selectedHours and actual interval for slider max etc.
             const pointsInWindowForSlider = Math.floor(selectedHours * (60 / BACKEND_FETCH_INTERVAL_MINUTES)); 
-
-            console.log('JS: Rendering charts with zoom:');
-            console.log('  Selected Hours:', selectedHours);
-            console.log('  Slider Value:', sliderValue);
-            console.log('  Points in Window (Expected for Slicing Logic):', pointsInWindowForSlider); 
-            console.log('  Zoomed Data Length (after actual slice):', zoomedData.timestamps.length);
-            if (zoomedData.timestamps.length > 0) {
-                console.log('  Zoomed Timestamps (first/last):', zoomedData.timestamps[0], zoomedData.timestamps[zoomedData.timestamps.length - 1]);
-            }
-
 
             const commonChartOptions = {
                 responsive: true,
@@ -365,8 +346,13 @@
             ];
             const voltageOptions = JSON.parse(JSON.stringify(commonChartOptions));
             voltageOptions.scales.y.title = { display: true, text: 'Voltage (V)' };
-            voltageOptions.scales.y.min = 3.20; 
-            voltageOptions.scales.y.max = 3.35; 
+            // --- FIX: Dynamic Voltage Scale ---
+            const voltageValues = zoomedData.voltage.filter(val => val !== null && !isNaN(val));
+            const voltageMinData = voltageValues.length > 0 ? Math.min(...voltageValues) : 3.20;
+            const voltageMaxData = voltageValues.length > 0 ? Math.max(...voltageValues) : 3.40;
+            voltageOptions.scales.y.min = Math.floor(voltageMinData * 100) / 100 - 0.05; // Round down to .01 and subtract padding
+            voltageOptions.scales.y.max = Math.ceil(voltageMaxData * 100) / 100 + 0.05;  // Round up to .01 and add padding
+            // --- End FIX ---
             voltageChart = updateChart(voltageChart, voltageCtx, 'line', zoomedData.timestamps, voltageDatasets, voltageOptions);
 
             const currentDatasets = [
@@ -387,22 +373,19 @@
             ];
             const powerOptions = JSON.parse(JSON.stringify(commonChartOptions));
             powerOptions.scales.y.title = { display: true, text: 'Optical Power (dBm)' };
-            powerOptions.scales.y.min = -30;
-            powerOptions.scales.y.max = 10;
+            // --- FIX: Dynamic Optical Power Scale ---
+            const powerValues = [...zoomedData.transmit_power, ...zoomedData.receive_power].filter(val => val !== null && !isNaN(val));
+            const powerMinData = powerValues.length > 0 ? Math.min(...powerValues) : -30;
+            const powerMaxData = powerValues.length > 0 ? Math.max(...powerValues) : 10;
+            powerOptions.scales.y.min = Math.floor(powerMinData / 1) * 1 - 2; // Round down to nearest int and subtract padding
+            powerOptions.scales.y.max = Math.ceil(powerMaxData / 1) * 1 + 2;  // Round up to nearest int and add padding
+            // --- End FIX ---
             powerChart = updateChart(powerChart, powerCtx, 'line', zoomedData.timestamps, powerDatasets, powerOptions);
 
-            // --- FIX 3: Correctly set slider max and value ---
-            // The max value for the slider represents the 'index' of the leftmost data point in the total history
-            // when the window is at its leftmost position.
-            // If totalPoints is 22, pointsInWindow is 12 (1 hour), max is 10. Slider goes from 0 to 10.
             const sliderMax = Math.max(0, fullHistoryData.timestamps.length - pointsInWindowForSlider);
             document.getElementById('timeSlider').max = sliderMax;
-
-            // Ensure sliderValue is clamped if zoom makes it go out of bounds
             sliderValue = Math.max(0, Math.min(sliderValue, sliderMax));
             document.getElementById('timeSlider').value = sliderValue; 
-            console.log('JS: Slider updated: max =', sliderMax, ', value =', sliderValue);
-            // --- End FIX 3 ---
         }
 
         function updateStat(element, value, unit) {
@@ -426,7 +409,6 @@
                 countdownEl.style.color = '#0c5460'; 
                 
                 if (!isFetching && timeSinceBackendFetchStart >= BACKEND_FETCH_INTERVAL_SECONDS - 2) { 
-                     console.log('JS: Countdown hit 0 or went negative, triggering fetchData...');
                      fetchData(); 
                 }
             } else {
@@ -439,7 +421,6 @@
 
         async function fetchData() {
             if (isFetching) {
-                console.log('JS: Fetch already in progress, skipping.');
                 return;
             }
             isFetching = true;
@@ -453,26 +434,18 @@
                 const id = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
                 const fetchUrl = `${window.location.protocol}//${window.location.hostname}:5050/data`;
-                console.log('JS: Attempting to fetch from:', fetchUrl);
                 const response = await fetch(fetchUrl, { signal: controller.signal });
                 clearTimeout(id);
                 
-                console.log('JS: Fetch response received. Status:', response.status);
-
                 if (!response.ok) {
                     const errorBody = await response.text(); 
-                    console.error(`JS: HTTP error! status: ${response.status}`, response.statusText, 'Body:', errorBody);
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`HTTP error! status: ${response.status} ${response.statusText}. Body: ${errorBody}`);
                 }
                 const data = await response.json();
-                console.log('JS: Successfully parsed JSON data:', data);
 
                 if (!data || !data.current || !data.history) {
-                    console.error('JS: Fetched data has unexpected structure:', data);
                     throw new Error('Invalid data structure received');
                 }
-                console.log('JS: Current data received:', data.current);
-                console.log('JS: History data received:', data.history);
                 
                 updateStat(currentTemp1El, data.current.temp1, '°C');
                 updateStat(currentTemp2El, data.current.temp2, '°C');
@@ -484,23 +457,17 @@
                 
                 if (data.current.last_fetch_timestamp_iso) {
                     lastBackendFetchTimestamp = new Date(data.current.last_fetch_timestamp_iso).getTime();
-                    console.log('JS: Initializing lastBackendFetchTimestamp from backend data:', lastBackendFetchTimestamp);
                 } else {
                     lastBackendFetchTimestamp = Date.now(); 
-                    console.warn('JS: Backend did not provide last_fetch_timestamp_iso, using Date.now() as fallback.');
                 }
 
                 if (countdownTimer) clearInterval(countdownTimer); 
                 countdownTimer = setInterval(updateCountdown, FRONTEND_REFRESH_INTERVAL_MS);
 
                 fullHistoryData = data.history;
-                renderCharts(); // Call renderCharts after fullHistoryData is updated
+                renderCharts(); 
 
             } catch (error) {
-                console.error("JS: Error fetching data:", error);
-                if (error.name === 'AbortError') {
-                    console.error('JS: Fetch timed out!');
-                }
                 updateStat(currentTemp1El, NaN, ''); 
                 updateStat(currentTemp2El, NaN, '');
                 updateStat(currentOpticalTempEl, NaN, '');
@@ -517,24 +484,20 @@
         }
 
         document.addEventListener('DOMContentLoaded', (event) => {
-            console.log("JS: DOM fully loaded and parsed. Attaching event listeners.");
-
             document.querySelectorAll('.graph-controls button').forEach(button => {
                 button.addEventListener('click', function() {
-                    console.log('JS: Zoom button clicked:', this.dataset.hours, 'hours');
                     document.querySelectorAll('.graph-controls button').forEach(btn => btn.classList.remove('active'));
                     this.classList.add('active');
                     
                     selectedHours = parseInt(this.dataset.hours);
-                    sliderValue = 0; // Reset slider position when zoom changes
-                    renderCharts(); // Re-render charts with new zoom level
+                    sliderValue = 0; 
+                    renderCharts(); 
                 });
             });
 
             document.getElementById('timeSlider').addEventListener('input', function() {
-                console.log('JS: Slider moved. Value:', this.value);
                 sliderValue = parseInt(this.value);
-                renderCharts(); // Re-render charts with new scroll position
+                renderCharts(); 
             });
 
             fetchData(); 
