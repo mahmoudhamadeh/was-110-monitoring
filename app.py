@@ -46,11 +46,9 @@ B1=$(printf "%d" 0x$B1_HEX);
 B2=$(printf "%d" 0x$B2_HEX);
 OPTICAL_TEMP=$(awk -v a="$B1" -v b="$B2" 'BEGIN {printf "%.1f", a + b/256}');
 echo "{ \"temp1\": \"$TEMP1\", \"temp2\": \"$TEMP2\", \"optical_temp\": \"$OPTICAL_TEMP\" }"
-"""
-SFP_CORE_TEMP_COMMAND = SFP_CORE_TEMP_COMMAND.strip()
+""".strip()
 
-SFP_OPTICAL_STATUS_COMMAND = r"""pontop -b -g 'Optical Interface Status'"""
-SFP_OPTICAL_STATUS_COMMAND = SFP_OPTICAL_STATUS_COMMAND.strip()
+SFP_OPTICAL_STATUS_COMMAND = r"""pontop -b -g 'Optical Interface Status'""".strip()
 
 current_stats_data = {
     "temp1": None, "temp2": None, "optical_temp": None,
@@ -74,13 +72,9 @@ timestamps_history = collections.deque(maxlen=HISTORY_MAX_SIZE)
 last_fetch_completion_time_dt = datetime.now(timezone.utc)
 
 ssh_client = None
-ssh_client_lock = threading.Lock() 
+ssh_client_lock = threading.Lock()
 
 def get_ssh_client():
-    """
-    Returns an active SSH client. Establishes connection if not already connected.
-    Uses a lock to ensure thread-safe connection attempts.
-    """
     global ssh_client
     with ssh_client_lock:
         if ssh_client is None or not ssh_client.get_transport() or not ssh_client.get_transport().is_active():
@@ -88,7 +82,6 @@ def get_ssh_client():
             if SFP_PASSWORD is None or SFP_PASSWORD == "dummy_password_not_set":
                 print(f"[{datetime.now().isoformat()}] ERROR: SFP password environment variable not set. Cannot establish SSH connection.", flush=True)
                 return None
-
             try:
                 client = paramiko.SSHClient()
                 client.load_system_host_keys()
@@ -108,7 +101,6 @@ def get_ssh_client():
         return ssh_client
 
 def close_ssh_client():
-    """Closes the global SSH client if it's active."""
     global ssh_client
     with ssh_client_lock:
         if ssh_client and ssh_client.get_transport() and ssh_client.get_transport().is_active():
@@ -119,8 +111,7 @@ def close_ssh_client():
 def execute_remote_command(client, command_string):
     if not client or not client.get_transport() or not client.get_transport().is_active():
         print(f"[{datetime.now().isoformat()}] SSH client is not active when trying to execute command.", flush=True)
-        return "", "SSH client not active" 
-
+        return "", "SSH client not active"
     try:
         stdin, stdout, stderr = client.exec_command(command_string)
         output = stdout.read().decode('utf-8').strip()
@@ -128,24 +119,21 @@ def execute_remote_command(client, command_string):
         return output, error
     except paramiko.SSHException as e:
         print(f"[{datetime.now().isoformat()}] Error executing SSH command: {e}. Attempting to re-establish connection next cycle.", flush=True)
-        close_ssh_client() 
+        close_ssh_client()
         return "", f"Error executing command: {e}"
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] Unexpected error during SSH command execution: {e}", flush=True)
         close_ssh_client()
         return "", f"Unexpected error: {e}"
 
-
 def parse_optical_status_output(output):
     parsed_data = {}
-
     patterns = {
         "voltage": r"Transceiver supply voltage\s*:\s*([\d.]+) V",
         "current": r"Transmit bias current\s*:\s*([\d.]+) mA",
         "transmit_power": r"Transmit power\s*:\s*([-\d.]+) dBm",
         "receive_power": r"Receive power\s*:\s*([-\d.]+) dBm"
     }
-
     for key, pattern in patterns.items():
         match = re.search(pattern, output)
         if match:
@@ -157,37 +145,30 @@ def parse_optical_status_output(output):
         else:
             print(f"[{datetime.now().isoformat()}] Pattern for {key} not found in pontop output.", flush=True)
             parsed_data[key] = None
-
     return parsed_data
 
 def fetch_and_update_sfp_temperatures():
     global last_fetch_completion_time_dt
     print(f"[{datetime.now().isoformat()}] Attempting to fetch SFP data via persistent SSH...", flush=True)
-
-    client = get_ssh_client() 
+    client = get_ssh_client()
     if client is None:
         print(f"[{datetime.now().isoformat()}] Failed to get active SSH client. Skipping fetch.", flush=True)
-        last_fetch_completion_time_dt = None 
+        last_fetch_completion_time_dt = None
         return
-
     try:
         temp_output, temp_error = execute_remote_command(client, SFP_CORE_TEMP_COMMAND)
         if temp_error:
             print(f"[{datetime.now().isoformat()}] Core Temp SSH command error: {temp_error}", flush=True)
-            print(f"[{datetime.now().isoformat()}] Raw Core Temp output (stdout): {temp_output}", flush=True)
             core_data = {}
         else:
             try:
                 core_data = json.loads(temp_output)
             except json.JSONDecodeError as e:
                 print(f"[{datetime.now().isoformat()}] Error decoding JSON from Core Temp SFP: {e}", flush=True)
-                print(f"[{datetime.now().isoformat()}] Raw Core Temp output that caused error: {temp_output}", flush=True)
                 core_data = {}
-
         optical_output, optical_error = execute_remote_command(client, SFP_OPTICAL_STATUS_COMMAND)
         if optical_error:
             print(f"[{datetime.now().isoformat()}] Optical Status SSH command error: {optical_error}", flush=True)
-            print(f"[{datetime.now().isoformat()}] Raw Optical Status output (stdout): {optical_output}", flush=True)
             optical_data = {}
         else:
             optical_data = parse_optical_status_output(optical_output)
@@ -220,20 +201,15 @@ def fetch_and_update_sfp_temperatures():
 
         print(f"[{datetime.now().isoformat()}] Successfully fetched: {current_stats_data}", flush=True)
         save_history_to_file()
-
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] An unexpected error occurred during fetch: {e}", flush=True)
         close_ssh_client()
-        last_fetch_completion_time_dt = None 
-
+        last_fetch_completion_time_dt = None
 
 def periodic_fetch():
     while True:
         fetch_and_update_sfp_temperatures()
         time.sleep(FETCH_INTERVAL_SECONDS)
-
-fetch_thread = threading.Thread(target=periodic_fetch, daemon=True)
-fetch_thread.start()
 
 def save_history_to_file():
     history_data = {
@@ -251,12 +227,9 @@ def save_history_to_file():
         os.makedirs(DATA_DIR, exist_ok=True)
         temp_file_path = os.path.join(DATA_DIR, "sfp_history.json.tmp")
         final_file_path = os.path.join(DATA_DIR, "sfp_history.json")
-
         with open(temp_file_path, 'w') as f:
             json.dump(history_data, f)
-
         shutil.move(temp_file_path, final_file_path)
-
         print(f"[{datetime.now().isoformat()}] History saved to {final_file_path}. Points: {len(timestamps_history)}", flush=True)
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] ERROR: Failed to save history to file: {e}", flush=True)
@@ -267,7 +240,6 @@ def load_history_from_file():
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r') as f:
                 history_data = json.load(f)
-
             timestamps_history.extend(history_data.get("timestamps", []))
             temp1_history.extend(history_data.get("temp1", []))
             temp2_history.extend(history_data.get("temp2", []))
@@ -276,22 +248,14 @@ def load_history_from_file():
             current_history.extend(history_data.get("current", []))
             transmit_power_history.extend(history_data.get("transmit_power", []))
             receive_power_history.extend(history_data.get("receive_power", []))
-
             last_fetch_iso = history_data.get("last_fetch_completion_time_iso")
             if last_fetch_iso:
-                try:
-                    last_fetch_completion_time_dt = datetime.fromisoformat(last_fetch_iso).astimezone(timezone.utc)
-                    print(f"[{datetime.now().isoformat()}] Loaded last fetch time: {last_fetch_completion_time_dt.isoformat()}", flush=True)
-                except ValueError:
-                    print(f"[{datetime.now().isoformat()}] WARNING: Could not parse saved timestamp {last_fetch_iso}, initializing to now.", flush=True)
-                    last_fetch_completion_time_dt = datetime.now(timezone.utc)
+                last_fetch_completion_time_dt = datetime.fromisoformat(last_fetch_iso).astimezone(timezone.utc)
+                print(f"[{datetime.now().isoformat()}] Loaded last fetch time: {last_fetch_completion_time_dt.isoformat()}", flush=True)
             else:
-                print(f"[{datetime.now().isoformat()}] No last fetch timestamp found in file, initializing to now.", flush=True)
                 last_fetch_completion_time_dt = datetime.now(timezone.utc)
-
             print(f"[{datetime.now().isoformat()}] History loaded from {HISTORY_FILE}. Points: {len(timestamps_history)}", flush=True)
         else:
-            print(f"[{datetime.now().isoformat()}] No history file found at {HISTORY_FILE}. Starting fresh.", flush=True)
             last_fetch_completion_time_dt = datetime.now(timezone.utc)
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] ERROR: Failed to load history from file: {e}. Clearing history and starting fresh.", flush=True)
@@ -307,25 +271,18 @@ def load_history_from_file():
 
 @app.route('/')
 def index():
-    print(f"Serving index.html from: {app.static_folder}/index.html", flush=True)
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/data')
 def get_data():
     time_to_next_refresh_s = None
     last_fetch_timestamp_iso = None
-
     current_utc_time = datetime.now(timezone.utc)
-
     if last_fetch_completion_time_dt:
         next_scheduled_fetch_time = last_fetch_completion_time_dt + timedelta(seconds=FETCH_INTERVAL_SECONDS)
-
         time_until_next_fetch = next_scheduled_fetch_time - current_utc_time
-
         time_to_next_refresh_s = max(0, int(time_until_next_fetch.total_seconds()))
-
         last_fetch_timestamp_iso = last_fetch_completion_time_dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-
     response_data = {
         "current": {
             **current_stats_data,
@@ -344,33 +301,28 @@ def get_data():
         },
         "backend_fetch_interval_seconds": FETCH_INTERVAL_SECONDS
     }
-
-    print(f"[{datetime.now().isoformat()}] get_data() called. Sending last_fetch_completion_time_dt: {last_fetch_completion_time_dt} (UTC), time_to_next_refresh_s: {time_to_next_refresh_s}, backend_fetch_interval: {FETCH_INTERVAL_SECONDS}", flush=True)
-    print(f"[{datetime.now().isoformat()}] get_data() sending history points: {len(timestamps_history)}", flush=True)
-
     return jsonify(response_data)
 
-if __name__ == '__main__':
-    load_history_from_file()
-
+def startup():
     import atexit
     atexit.register(close_ssh_client)
+    if os.environ.get('IS_MAIN_WORKER', '1') == '1':
+        load_history_from_file()
+        initial_client = get_ssh_client()
+        if initial_client is None:
+            print(f"[{datetime.now().isoformat()}] WARNING: Initial SSH connection failed. Monitoring may not work.", flush=True)
+        perform_initial_fetch = False
+        if not timestamps_history:
+            print(f"[{datetime.now().isoformat()}] Initial fetch needed (no history loaded).", flush=True)
+            perform_initial_fetch = True
+        elif (datetime.now(timezone.utc) - last_fetch_completion_time_dt).total_seconds() > FETCH_INTERVAL_SECONDS:
+            print(f"[{datetime.now().isoformat()}] Initial fetch needed (history is old).", flush=True)
+            perform_initial_fetch = True
+        else:
+            print(f"[{datetime.now().isoformat()}] Using loaded history, next fetch due in {FETCH_INTERVAL_SECONDS - (datetime.now(timezone.utc) - last_fetch_completion_time_dt).total_seconds():.0f}s.", flush=True)
+        if perform_initial_fetch:
+            fetch_and_update_sfp_temperatures()
+        fetch_thread = threading.Thread(target=periodic_fetch, daemon=True)
+        fetch_thread.start()
 
-    initial_client = get_ssh_client()
-    if initial_client is None:
-        print(f"[{datetime.now().isoformat()}] WARNING: Initial SSH connection failed. Monitoring may not work.", flush=True)
-
-    perform_initial_fetch = False
-    if not timestamps_history: 
-        print(f"[{datetime.now().isoformat()}] Initial fetch needed (no history loaded).", flush=True)
-        perform_initial_fetch = True
-    elif (datetime.now(timezone.utc) - last_fetch_completion_time_dt).total_seconds() > FETCH_INTERVAL_SECONDS: 
-        print(f"[{datetime.now().isoformat()}] Initial fetch needed (history is old).", flush=True)
-        perform_initial_fetch = True
-    else:
-        print(f"[{datetime.now().isoformat()}] Using loaded history, next fetch due in {FETCH_INTERVAL_SECONDS - (datetime.now(timezone.utc) - last_fetch_completion_time_dt).total_seconds():.0f}s.", flush=True)
-
-    if perform_initial_fetch:
-        fetch_and_update_sfp_temperatures()
-
-    app.run(host='0.0.0.0', port=5050, debug=False)
+startup()
