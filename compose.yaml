@@ -12,4 +12,3 @@ services:
       - sfp_data_volume:/app/data
 volumes:
   sfp_data_volume: null
-networks: {}
