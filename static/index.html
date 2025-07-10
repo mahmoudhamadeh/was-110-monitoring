@@ -29,7 +29,7 @@
         }
         .current-stats {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); 
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
             width: 100%;
@@ -239,24 +239,24 @@
         const currentCtx = document.getElementById('currentChart').getContext('2d');
         const powerCtx = document.getElementById('powerChart').getContext('2d');
 
-        let tempChart, voltageChart, currentChart, powerChart; 
+        let tempChart, voltageChart, currentChart, powerChart;
         let fullHistoryData = {
             timestamps: [], temp1: [], temp2: [], optical_temp: [],
             voltage: [], current: [], transmit_power: [], receive_power: []
         };
 
-        let selectedHours = 3; 
-        let sliderValue = 0;   
+        let selectedHours = 3;
+        let sliderValue = 0;
 
-        const FRONTEND_REFRESH_INTERVAL_MS = 1000; 
-        const FETCH_TIMEOUT_MS = 10000; 
+        const FRONTEND_REFRESH_INTERVAL_MS = 1000;
+        const FETCH_TIMEOUT_MS = 10000;
 
         let countdownTimer;
-        let secondsRemaining; 
-        let lastBackendFetchTimestamp = 0; 
+        let secondsRemaining;
+        let lastBackendFetchTimestamp = 0;
 
-        const BACKEND_FETCH_INTERVAL_SECONDS = 300; 
-        const BACKEND_FETCH_INTERVAL_MINUTES = BACKEND_FETCH_INTERVAL_SECONDS / 60; 
+        let BACKEND_FETCH_INTERVAL_SECONDS = 300; 
+        let BACKEND_FETCH_INTERVAL_MINUTES = BACKEND_FETCH_INTERVAL_SECONDS / 60; 
 
         function updateChart(chartInstance, ctx, type, labels, datasets, options) {
             if (chartInstance) {
@@ -277,23 +277,24 @@
         function getZoomedData() {
             const totalPoints = fullHistoryData.timestamps.length;
             if (totalPoints === 0) {
-                return { 
+                return {
                     timestamps: [], temp1: [], temp2: [], optical_temp: [],
-                    voltage: [], current: [], transmit_power: [], receive_power: [] 
+                    voltage: [], current: [], transmit_power: [], receive_power: []
                 };
             }
 
-            const pointsInWindow = Math.floor(selectedHours * (60 / BACKEND_FETCH_INTERVAL_MINUTES)); 
+            const pointsInWindow = Math.floor(selectedHours * (60 / BACKEND_FETCH_INTERVAL_MINUTES));
+
             let startIndex;
             let endIndex;
 
             const displayPoints = Math.min(pointsInWindow, totalPoints);
-            
+
             const maxStartIndex = totalPoints - displayPoints;
 
             sliderValue = Math.max(0, Math.min(sliderValue, maxStartIndex));
 
-            startIndex = sliderValue; 
+            startIndex = sliderValue;
             endIndex = startIndex + displayPoints;
 
             return {
@@ -310,7 +311,7 @@
 
         function renderCharts() {
             const zoomedData = getZoomedData();
-            const pointsInWindowForSlider = Math.floor(selectedHours * (60 / BACKEND_FETCH_INTERVAL_MINUTES)); 
+            const pointsInWindowForSlider = Math.floor(selectedHours * (60 / BACKEND_FETCH_INTERVAL_MINUTES));
 
             const commonChartOptions = {
                 responsive: true,
@@ -346,13 +347,11 @@
             ];
             const voltageOptions = JSON.parse(JSON.stringify(commonChartOptions));
             voltageOptions.scales.y.title = { display: true, text: 'Voltage (V)' };
-            // --- FIX: Dynamic Voltage Scale ---
             const voltageValues = zoomedData.voltage.filter(val => val !== null && !isNaN(val));
             const voltageMinData = voltageValues.length > 0 ? Math.min(...voltageValues) : 3.20;
             const voltageMaxData = voltageValues.length > 0 ? Math.max(...voltageValues) : 3.40;
-            voltageOptions.scales.y.min = Math.floor(voltageMinData * 100) / 100 - 0.05; // Round down to .01 and subtract padding
-            voltageOptions.scales.y.max = Math.ceil(voltageMaxData * 100) / 100 + 0.05;  // Round up to .01 and add padding
-            // --- End FIX ---
+            voltageOptions.scales.y.min = Math.floor(voltageMinData * 100) / 100 - 0.05;
+            voltageOptions.scales.y.max = Math.ceil(voltageMaxData * 100) / 100 + 0.05;
             voltageChart = updateChart(voltageChart, voltageCtx, 'line', zoomedData.timestamps, voltageDatasets, voltageOptions);
 
             const currentDatasets = [
@@ -373,19 +372,17 @@
             ];
             const powerOptions = JSON.parse(JSON.stringify(commonChartOptions));
             powerOptions.scales.y.title = { display: true, text: 'Optical Power (dBm)' };
-            // --- FIX: Dynamic Optical Power Scale ---
             const powerValues = [...zoomedData.transmit_power, ...zoomedData.receive_power].filter(val => val !== null && !isNaN(val));
             const powerMinData = powerValues.length > 0 ? Math.min(...powerValues) : -30;
             const powerMaxData = powerValues.length > 0 ? Math.max(...powerValues) : 10;
-            powerOptions.scales.y.min = Math.floor(powerMinData / 1) * 1 - 2; // Round down to nearest int and subtract padding
-            powerOptions.scales.y.max = Math.ceil(powerMaxData / 1) * 1 + 2;  // Round up to nearest int and add padding
-            // --- End FIX ---
+            powerOptions.scales.y.min = Math.floor(powerMinData / 1) * 1 - 2;
+            powerOptions.scales.y.max = Math.ceil(powerMaxData / 1) * 1 + 2;
             powerChart = updateChart(powerChart, powerCtx, 'line', zoomedData.timestamps, powerDatasets, powerOptions);
 
             const sliderMax = Math.max(0, fullHistoryData.timestamps.length - pointsInWindowForSlider);
             document.getElementById('timeSlider').max = sliderMax;
             sliderValue = Math.max(0, Math.min(sliderValue, sliderMax));
-            document.getElementById('timeSlider').value = sliderValue; 
+            document.getElementById('timeSlider').value = sliderValue;
         }
 
         function updateStat(element, value, unit) {
@@ -398,7 +395,7 @@
                 element.style.color = '#007bff';
             }
         }
-        
+
         function updateCountdown() {
             const now = Date.now();
             const timeSinceBackendFetchStart = (now - lastBackendFetchTimestamp) / 1000;
@@ -406,18 +403,18 @@
 
             if (effectiveSecondsRemaining <= 0) {
                 countdownEl.textContent = '0s';
-                countdownEl.style.color = '#0c5460'; 
-                
-                if (!isFetching && timeSinceBackendFetchStart >= BACKEND_FETCH_INTERVAL_SECONDS - 2) { 
-                     fetchData(); 
+                countdownEl.style.color = '#0c5460';
+
+                if (!isFetching && timeSinceBackendFetchStart >= BACKEND_FETCH_INTERVAL_SECONDS - 2) {
+                     fetchData();
                 }
             } else {
                 countdownEl.textContent = `${effectiveSecondsRemaining}s`;
-                countdownEl.style.color = '#0c5460'; 
+                countdownEl.style.color = '#0c5460';
             }
         }
 
-        let isFetching = false; 
+        let isFetching = false;
 
         async function fetchData() {
             if (isFetching) {
@@ -425,7 +422,7 @@
             }
             isFetching = true;
 
-            if (countdownTimer) clearInterval(countdownTimer); 
+            if (countdownTimer) clearInterval(countdownTimer);
             countdownEl.textContent = 'Fetching...';
             countdownEl.style.color = '#007bff';
 
@@ -436,9 +433,9 @@
                 const fetchUrl = `${window.location.protocol}//${window.location.hostname}:5050/data`;
                 const response = await fetch(fetchUrl, { signal: controller.signal });
                 clearTimeout(id);
-                
+
                 if (!response.ok) {
-                    const errorBody = await response.text(); 
+                    const errorBody = await response.text();
                     throw new Error(`HTTP error! status: ${response.status} ${response.statusText}. Body: ${errorBody}`);
                 }
                 const data = await response.json();
@@ -446,7 +443,7 @@
                 if (!data || !data.current || !data.history) {
                     throw new Error('Invalid data structure received');
                 }
-                
+
                 updateStat(currentTemp1El, data.current.temp1, '°C');
                 updateStat(currentTemp2El, data.current.temp2, '°C');
                 updateStat(currentOpticalTempEl, data.current.optical_temp, '°C');
@@ -454,21 +451,26 @@
                 updateStat(currentCurrentEl, data.current.current, ' mA');
                 updateStat(currentTransmitPowerEl, data.current.transmit_power, ' dBm');
                 updateStat(currentReceivePowerEl, data.current.receive_power, ' dBm');
-                
+
                 if (data.current.last_fetch_timestamp_iso) {
                     lastBackendFetchTimestamp = new Date(data.current.last_fetch_timestamp_iso).getTime();
                 } else {
-                    lastBackendFetchTimestamp = Date.now(); 
+                    lastBackendFetchTimestamp = Date.now();
                 }
 
-                if (countdownTimer) clearInterval(countdownTimer); 
+                if (data.backend_fetch_interval_seconds) {
+                    BACKEND_FETCH_INTERVAL_SECONDS = data.backend_fetch_interval_seconds;
+                    BACKEND_FETCH_INTERVAL_MINUTES = BACKEND_FETCH_INTERVAL_SECONDS / 60;
+                }
+
+                if (countdownTimer) clearInterval(countdownTimer);
                 countdownTimer = setInterval(updateCountdown, FRONTEND_REFRESH_INTERVAL_MS);
 
                 fullHistoryData = data.history;
-                renderCharts(); 
+                renderCharts();
 
             } catch (error) {
-                updateStat(currentTemp1El, NaN, ''); 
+                updateStat(currentTemp1El, NaN, '');
                 updateStat(currentTemp2El, NaN, '');
                 updateStat(currentOpticalTempEl, NaN, '');
                 updateStat(currentVoltageEl, NaN, '');
@@ -488,19 +490,19 @@
                 button.addEventListener('click', function() {
                     document.querySelectorAll('.graph-controls button').forEach(btn => btn.classList.remove('active'));
                     this.classList.add('active');
-                    
+
                     selectedHours = parseInt(this.dataset.hours);
-                    sliderValue = 0; 
-                    renderCharts(); 
+                    sliderValue = 0;
+                    renderCharts();
                 });
             });
 
             document.getElementById('timeSlider').addEventListener('input', function() {
                 sliderValue = parseInt(this.value);
-                renderCharts(); 
+                renderCharts();
             });
 
-            fetchData(); 
+            fetchData();
         });
     </script>
 </body>
