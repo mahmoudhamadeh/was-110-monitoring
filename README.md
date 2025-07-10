@@ -10,6 +10,7 @@
 <body class="stackedit">
   <div class="stackedit__html"><h1 id="was-110-monitoring-dashboard">WAS-110 Monitoring Dashboard</h1>
 <p>This project provides a lightweight web dashboard for  <strong>real-time monitoring</strong>  of metrics from the  <strong>WAS-110 SFP stick</strong>. It’s designed to be deployed easily using Docker and runs on a local network with minimal configuration.</p>
+<p><img src="https://raw.githubusercontent.com/mahmoudhamadeh/was-110-monitoring/main/assets/dashboard.png" alt="Live Dashboard Preview"></p>
 <h2 id="file-structure">File Structure</h2>
 <pre><code>was-110-monitoring
 ├── app.py                  # Python Flask backend application
@@ -20,7 +21,7 @@
 ├── .env                    # Environment variables (sensitive data)
 └── compose.yaml            # Docker Compose configuration file
 </code></pre>
-<h2 id="run-using-prebuilt-docker-image">Run Using Prebuilt Docker Image</h2>
+<h2 id="run-using-prebuilt-docker-image">Run Using Prebuilt (<a href="https://hub.docker.com/r/mhamadeh/was-110-monitor">Docker Image</a>)</h2>
 <p>Pull and run the latest image from Docker Hub:</p>
 <pre><code>services:
   was-110-monitor:
@@ -46,7 +47,7 @@ volumes:
   -v sfp_data_volume:/data \
   mhamadeh/was-110-monitor:latest
 </code></pre>
-<h2 id="build-from-source-github">Build From Source (GitHub)</h2>
+<h2 id="build-from-source-github">Build From Source (<a href="https://github.com/mahmoudhamadeh/was-110-monitoring">GitHub</a>)</h2>
 <p>Clone the Repository</p>
 <pre><code>git clone https://github.com/yourusername/was-110-monitoring.git
 cd was-110-monitoring` 
