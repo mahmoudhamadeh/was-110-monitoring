@@ -4,12 +4,12 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-RUN apt-get update && apt-get install -y --no-install-recommends rsync && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir --upgrade pip setuptools
+RUN apt-get update && apt-get install -y --no-install-recommends rsync && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY app.py .
 COPY static ./static
 
 EXPOSE 5050
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5050", "app:app"]
