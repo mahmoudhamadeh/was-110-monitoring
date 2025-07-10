@@ -7,6 +7,7 @@ services:
       - 5050:5050
     environment:
       - SFP_ROOT_PASSWORD
+      - FETCH_INTERVAL_SECONDS
     volumes:
       - ./static:/app/static
       - sfp_data_volume:/app/data
