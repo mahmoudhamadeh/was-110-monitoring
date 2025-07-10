@@ -10,6 +10,6 @@ services:
       - FETCH_INTERVAL_SECONDS
     volumes:
       - ./static:/app/static
-      - sfp_data_volume:/app/data
+      - sfp_data_volume:/data
 volumes:
   sfp_data_volume: null
