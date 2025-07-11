@@ -1,0 +1,17 @@
+docker buildx create --name mybuilder --use
+docker buildx inspect mybuilder --bootstrap
+
+docker login
+
+
+docker buildx build \
+  --platform linux/arm64,linux/amd64 \
+  -t mhamadeh/was-110-monitor:latest \
+  --push .
+
+docker compose down --volumes
+docker buildx prune
+docker system prune -a --volumes
+git clone https://github.com/mahmoudhamadeh/was-110-monitoring.git
+
+git reset --hard xxxhashxxx
